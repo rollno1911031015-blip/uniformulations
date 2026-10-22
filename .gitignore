@@ -1,0 +1,7 @@
+# Local / secrets / large files
+config.php
+*.zip
+error.log
+.vscode/
+admin/temp/
+admin/ajax/temp/

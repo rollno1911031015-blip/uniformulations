@@ -1,26 +1,22 @@
 <?php
 include("../layouts/header.php");
 
-// Pin / Star flags on leads (columns are created on first load if missing)
-foreach (['is_pinned', 'is_starred'] as $flagColumn) {
-    $res = $mysqli->query("SHOW COLUMNS FROM lead LIKE '" . $flagColumn . "'");
-    if ($res->num_rows == 0) {
-        $mysqli->query("ALTER TABLE lead ADD COLUMN " . $flagColumn . " TINYINT(1) NOT NULL DEFAULT 0");
-    }
+// Pin flag on leads (column is created on first load if missing)
+$res = $mysqli->query("SHOW COLUMNS FROM lead LIKE 'is_pinned'");
+if ($res->num_rows == 0) {
+    $mysqli->query("ALTER TABLE lead ADD COLUMN is_pinned TINYINT(1) NOT NULL DEFAULT 0");
 }
 
-if (isset($_POST['toggle_flag'])) {
-    $flags = ['pin' => 'is_pinned', 'star' => 'is_starred'];
+if (isset($_POST['toggle_pin'])) {
     $out = ['ok' => false];
 
-    if (isset($flags[$_POST['toggle_flag']]) && !empty($_POST['id'])) {
-        $col = $flags[$_POST['toggle_flag']];
-        $stmt = $mysqli->prepare("UPDATE lead SET $col = 1 - $col, updated_at = updated_at WHERE id=? AND user_id IN (" . $userIds . ")");
+    if (!empty($_POST['id'])) {
+        $stmt = $mysqli->prepare("UPDATE lead SET is_pinned = 1 - is_pinned, updated_at = updated_at WHERE id=? AND user_id IN (" . $userIds . ")");
         $stmt->bind_param("i", $_POST['id']);
         $stmt->execute();
         $stmt->close();
 
-        $stmt = $mysqli->prepare("SELECT $col AS value FROM lead WHERE id=?");
+        $stmt = $mysqli->prepare("SELECT is_pinned AS value FROM lead WHERE id=?");
         $stmt->bind_param("i", $_POST['id']);
         $stmt->execute();
         $row = $stmt->get_result()->fetch_assoc();
@@ -306,10 +302,9 @@ $per = permissions(7, $mysqli, $user);
                     <div class="col-2 mt-3">
 
                         <select name="view" id="view" class="form-control" onchange="this.form.submit()">
-                            <option value="">All contacts</option>
-                            <option value="interested" <?= ($_GET['view'] ?? '') == 'interested' ? 'selected' : '' ?>>Interested (follow-up)</option>
+                            <option value="">All</option>
+                            <option value="interested" <?= ($_GET['view'] ?? '') == 'interested' ? 'selected' : '' ?>>Interested</option>
                             <option value="pinned" <?= ($_GET['view'] ?? '') == 'pinned' ? 'selected' : '' ?>>Pinned</option>
-                            <option value="starred" <?= ($_GET['view'] ?? '') == 'starred' ? 'selected' : '' ?>>Starred</option>
                         </select>
 
                     </div>
@@ -338,7 +333,7 @@ $per = permissions(7, $mysqli, $user);
                 <thead>
                     <tr>
                         <th>ID</th>
-                        <th>Pin / Star</th>
+                        <th>Pin</th>
                         <th>Division</th>
                         <th>Name</th>
                         <th>mobile</th>
@@ -397,8 +392,6 @@ $per = permissions(7, $mysqli, $user);
                         $orderBy = "a.is_pinned DESC, (a.remind_date IS NULL OR a.remind_date = '0000-00-00') ASC, a.remind_date ASC, a.id DESC";
                     } elseif ($view == 'pinned') {
                         $where .= " and a.is_pinned = 1";
-                    } elseif ($view == 'starred') {
-                        $where .= " and a.is_starred = 1";
                     }
 
                     try {
@@ -415,13 +408,11 @@ $per = permissions(7, $mysqli, $user);
                     $no = 1;
                     while ($row = $company->fetch_assoc()) {
                         $pinClass = $row['is_pinned'] ? 'text-primary' : 'text-muted';
-                        $starClass = $row['is_starred'] ? 'text-warning' : 'text-muted';
-                        $flagButtons = '<button type="button" class="btn btn-link p-0 me-2 toggle-flag" data-flag="pin" data-id="' . $row['id'] . '" title="Pin to top (follow-up)"><i class="fa fa-thumbtack ' . $pinClass . '"></i></button>
-                                        <button type="button" class="btn btn-link p-0 toggle-flag" data-flag="star" data-id="' . $row['id'] . '" title="Star"><i class="fa fa-star ' . $starClass . '"></i></button>';
+                        $pinButton = '<button type="button" class="btn btn-link p-0 toggle-pin" data-id="' . $row['id'] . '" title="Pin to top (follow-up)"><i class="fa fa-thumbtack ' . $pinClass . '"></i></button>';
 
                         echo '<tr' . ($row['is_pinned'] ? ' class="table-primary"' : '') . '>
                                         <td>' . $row['id'] . '</td>
-                                        <td data-order="' . ($row['is_pinned'] * 2 + $row['is_starred']) . '">' . $flagButtons . '</td>
+                                        <td data-order="' . (int) $row['is_pinned'] . '">' . $pinButton . '</td>
                                         <td>' . $row['division_name'] . '</td>
                                         <td>' . $row['name'] . '</td>
                                         <td>' . $row['mobile'] . '</td>
@@ -805,21 +796,15 @@ $per = permissions(7, $mysqli, $user);
         "buttons": ["excel", 'csv'],
     }).buttons().container().appendTo('.col-md-6:eq()');
 
-    $(document).on("click", ".toggle-flag", function() {
-        var btn = $(this);
+    $(document).on("click", ".toggle-pin", function() {
         $.post("", {
-            toggle_flag: btn.data("flag"),
-            id: btn.data("id")
+            toggle_pin: 1,
+            id: $(this).data("id")
         }, function(res) {
-            if (!res.ok) {
-                return;
-            }
-            if (btn.data("flag") == "pin") {
+            if (res.ok) {
                 // reload so the pinned lead moves to the top
                 location.reload();
-                return;
             }
-            btn.find("i").toggleClass("text-warning", res.value == 1).toggleClass("text-muted", res.value != 1);
         }, "json");
     });
 

@@ -8,7 +8,7 @@ if (isset($_POST['BtnSave'])) {
     $city = "";
 
     if (!empty($_POST['city'])) {
-        $city = implode(',', $_POST['city']);
+        $city = implode(',', array_filter(array_map('trim', $_POST['city']), 'strlen'));
     }
 
 
@@ -1264,17 +1264,16 @@ if (isset($_POST["btnGetProduct"])) {
         $("#due_days").val($(this).data("dueday"));
 
 
-        var str = $(this).data("city")
+        var str = $(this).data("city");
+        var selectedCities = [];
 
-        if (str !== false && str !== 0) {
-            var arr = str.toString().split(',').map(function(item) {
+        if (str !== false && str !== 0 && str !== "") {
+            selectedCities = str.toString().split(',').map(function(item) {
                 return item.trim(); // Trim any extra whitespace
-            });
+            }).filter(Boolean);
         }
 
-        var state = $(this).data("state");
-        $("#hcity").html("<option value=" + str + " selected>" + str + "</option>")
-        $("#hstate").append("<option value=" + state + " selected>" + state + "</option>")
+        loadHomeCities($(this).data("state"), selectedCities);
 
         $("#hpincode").val($(this).data("pincode"));
         $("#hcountry").val($(this).data("country"));
@@ -1309,11 +1308,12 @@ if (isset($_POST["btnGetProduct"])) {
         $("#city").val("");
         $("#pincode").val("");
         $("#password").val("");
+        loadHomeCities($("#hstate").val(), []);
 
         $("#exampleModal").modal("show");
     })
 
-    $(".state").on("change", function() {
+    $("#state").on("change", function() {
         state = $(this).val();
         $.ajax({
             method: 'POST',
@@ -1330,7 +1330,11 @@ if (isset($_POST["btnGetProduct"])) {
     });
 
     $("#hstate").on("change", function() {
-        state = $(this).val();
+        loadHomeCities($(this).val(), []);
+    });
+
+    // Fill the multi-select city list for a state and tick the given (saved) cities
+    function loadHomeCities(state, selected) {
         $.ajax({
             method: 'POST',
             url: 'ajax/get-city.php',
@@ -1338,12 +1342,20 @@ if (isset($_POST["btnGetProduct"])) {
                 state: state
             },
             success: function(data) {
-
                 $("#hcity").html(data);
-
+                $("#hcity option[value='']").remove();
+                // keep saved cities that are missing from the state's master list
+                selected.forEach(function(city) {
+                    if ($("#hcity option").filter(function() {
+                            return this.value === city;
+                        }).length === 0) {
+                        $("#hcity").append($("<option>").val(city).text(city));
+                    }
+                });
+                $("#hcity").val(selected).trigger("change");
             }
         });
-    });
+    }
 
 
 

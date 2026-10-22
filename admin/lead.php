@@ -11,7 +11,7 @@ if (isset($_POST['BtnSave'])) {
     }
 
     if (!empty($_POST['city'])) {
-        $city = implode(',', $_POST['city']);
+        $city = implode(',', array_filter(array_map('trim', $_POST['city']), 'strlen'));
     }
     if (empty($_POST['date'])) {
         $_POST['date'] = "0000-00-00";
@@ -731,7 +731,11 @@ $per = permissions(7, $mysqli, $user);
 <script>
     $("#city").select2()
     $("#state").on("change", function() {
-        state = $(this).val();
+        loadCities($(this).val(), []);
+    });
+
+    // Fill the multi-select city list for a state and tick the given (saved) cities
+    function loadCities(state, selected) {
         $.ajax({
             method: 'POST',
             url: 'ajax/get-city.php',
@@ -739,12 +743,20 @@ $per = permissions(7, $mysqli, $user);
                 state: state
             },
             success: function(data) {
-
                 $("#city").html(data);
-
+                $("#city option[value='']").remove();
+                // keep saved cities that are missing from the state's master list
+                selected.forEach(function(city) {
+                    if ($("#city option").filter(function() {
+                            return this.value === city;
+                        }).length === 0) {
+                        $("#city").append($("<option>").val(city).text(city));
+                    }
+                });
+                $("#city").val(selected).trigger("change");
             }
         });
-    });
+    }
 
     $(document).on("click", ".edit_company", function() {
         var id = $(this).data("id");
@@ -763,10 +775,14 @@ $per = permissions(7, $mysqli, $user);
                     $('input[name=' + i + ']').val(o);
                     $('select[name=' + i + ']').val(o);
                     $('textarea[name=' + i + ']').val(o);
-                    if (i == "city") {
-                        $("#city").html("<option value=" + o + ">" + o + "</option>")
-                    }
                 })
+                var savedCities = [];
+                if (data.city) {
+                    savedCities = data.city.toString().split(',').map(function(item) {
+                        return item.trim();
+                    }).filter(Boolean);
+                }
+                loadCities(data.state, savedCities);
                 $("#modal_name").text("Update Lead");
                 $("#exampleModal").modal("show");
 
@@ -782,6 +798,7 @@ $per = permissions(7, $mysqli, $user);
         $('input').val("");
         $('select').val("");
         $('textarea').val("");
+        $("#city").empty().trigger("change");
 
         $("#exampleModal").modal("show");
     });

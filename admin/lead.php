@@ -1,6 +1,40 @@
 <?php
 include("../layouts/header.php");
 
+// Pin / Star flags on leads (columns are created on first load if missing)
+foreach (['is_pinned', 'is_starred'] as $flagColumn) {
+    $res = $mysqli->query("SHOW COLUMNS FROM lead LIKE '" . $flagColumn . "'");
+    if ($res->num_rows == 0) {
+        $mysqli->query("ALTER TABLE lead ADD COLUMN " . $flagColumn . " TINYINT(1) NOT NULL DEFAULT 0");
+    }
+}
+
+if (isset($_POST['toggle_flag'])) {
+    $flags = ['pin' => 'is_pinned', 'star' => 'is_starred'];
+    $out = ['ok' => false];
+
+    if (isset($flags[$_POST['toggle_flag']]) && !empty($_POST['id'])) {
+        $col = $flags[$_POST['toggle_flag']];
+        $stmt = $mysqli->prepare("UPDATE lead SET $col = 1 - $col, updated_at = updated_at WHERE id=? AND user_id IN (" . $userIds . ")");
+        $stmt->bind_param("i", $_POST['id']);
+        $stmt->execute();
+        $stmt->close();
+
+        $stmt = $mysqli->prepare("SELECT $col AS value FROM lead WHERE id=?");
+        $stmt->bind_param("i", $_POST['id']);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        $out = ['ok' => true, 'value' => (int) $row['value']];
+    }
+
+    ob_clean();
+    header('Content-Type: application/json');
+    echo json_encode($out);
+    exit;
+}
+
 if (isset($_POST['BtnSave'])) {
 
     $city = "";
@@ -269,6 +303,16 @@ $per = permissions(7, $mysqli, $user);
                         </select>
 
                     </div>
+                    <div class="col-2 mt-3">
+
+                        <select name="view" id="view" class="form-control" onchange="this.form.submit()">
+                            <option value="">All contacts</option>
+                            <option value="interested" <?= ($_GET['view'] ?? '') == 'interested' ? 'selected' : '' ?>>Interested (follow-up)</option>
+                            <option value="pinned" <?= ($_GET['view'] ?? '') == 'pinned' ? 'selected' : '' ?>>Pinned</option>
+                            <option value="starred" <?= ($_GET['view'] ?? '') == 'starred' ? 'selected' : '' ?>>Starred</option>
+                        </select>
+
+                    </div>
                 </div>
             </form>
 
@@ -290,10 +334,11 @@ $per = permissions(7, $mysqli, $user);
     </div>
     <div class="card-body">
         <div class="">
-            <table class="table dataTable">
+            <table class="table lead-table">
                 <thead>
                     <tr>
                         <th>ID</th>
+                        <th>Pin / Star</th>
                         <th>Division</th>
                         <th>Name</th>
                         <th>mobile</th>
@@ -341,8 +386,23 @@ $per = permissions(7, $mysqli, $user);
                         array_push($ar, $_GET['user_id']);
                     }
 
+                    $view = $_GET['view'] ?? '';
+                    $orderBy = "a.is_pinned DESC, a.id DESC";
+
+                    if ($view == 'interested') {
+                        // contacts with a follow-up planned: scheduled/hot status or a remind date set
+                        $where .= " and (d.name IN ('Call Scheduled','Visit Scheduled','Hot leads') OR (a.remind_date IS NOT NULL AND a.remind_date <> '0000-00-00'))";
+                        $where .= " and d.name NOT IN ('Converted','Not interested','Fake','DUPLICATES')";
+                        // pinned first, then the nearest follow-up date
+                        $orderBy = "a.is_pinned DESC, (a.remind_date IS NULL OR a.remind_date = '0000-00-00') ASC, a.remind_date ASC, a.id DESC";
+                    } elseif ($view == 'pinned') {
+                        $where .= " and a.is_pinned = 1";
+                    } elseif ($view == 'starred') {
+                        $where .= " and a.is_starred = 1";
+                    }
+
                     try {
-                        $stmt = $mysqli->prepare("SELECT a.*,b.name as division_name,c.name as user_name,d.name as status_name from lead a left join brand b on a.division=b.id  join admin_users c on a.user_id=c.id join status d on a.status=d.id where $where    and  user_id in (" . $userIds . ") order by a.id desc");
+                        $stmt = $mysqli->prepare("SELECT a.*,b.name as division_name,c.name as user_name,d.name as status_name from lead a left join brand b on a.division=b.id  join admin_users c on a.user_id=c.id join status d on a.status=d.id where $where    and  user_id in (" . $userIds . ") order by $orderBy");
                         if ($type) {
                             $stmt->bind_param($type, ...$ar);
                         }
@@ -354,8 +414,14 @@ $per = permissions(7, $mysqli, $user);
                     $company = $stmt->get_result();
                     $no = 1;
                     while ($row = $company->fetch_assoc()) {
-                        echo '<tr>
+                        $pinClass = $row['is_pinned'] ? 'text-primary' : 'text-muted';
+                        $starClass = $row['is_starred'] ? 'text-warning' : 'text-muted';
+                        $flagButtons = '<button type="button" class="btn btn-link p-0 me-2 toggle-flag" data-flag="pin" data-id="' . $row['id'] . '" title="Pin to top (follow-up)"><i class="fa fa-thumbtack ' . $pinClass . '"></i></button>
+                                        <button type="button" class="btn btn-link p-0 toggle-flag" data-flag="star" data-id="' . $row['id'] . '" title="Star"><i class="fa fa-star ' . $starClass . '"></i></button>';
+
+                        echo '<tr' . ($row['is_pinned'] ? ' class="table-primary"' : '') . '>
                                         <td>' . $row['id'] . '</td>
+                                        <td data-order="' . ($row['is_pinned'] * 2 + $row['is_starred']) . '">' . $flagButtons . '</td>
                                         <td>' . $row['division_name'] . '</td>
                                         <td>' . $row['name'] . '</td>
                                         <td>' . $row['mobile'] . '</td>
@@ -729,6 +795,34 @@ $per = permissions(7, $mysqli, $user);
 
 <?php include("../layouts/footer.php"); ?>
 <script>
+    // order: [] keeps the server order (pinned leads first)
+    $(".lead-table").DataTable({
+        "responsive": true,
+        "lengthChange": true,
+        "autoWidth": false,
+        "ordering": true,
+        "order": [],
+        "buttons": ["excel", 'csv'],
+    }).buttons().container().appendTo('.col-md-6:eq()');
+
+    $(document).on("click", ".toggle-flag", function() {
+        var btn = $(this);
+        $.post("", {
+            toggle_flag: btn.data("flag"),
+            id: btn.data("id")
+        }, function(res) {
+            if (!res.ok) {
+                return;
+            }
+            if (btn.data("flag") == "pin") {
+                // reload so the pinned lead moves to the top
+                location.reload();
+                return;
+            }
+            btn.find("i").toggleClass("text-warning", res.value == 1).toggleClass("text-muted", res.value != 1);
+        }, "json");
+    });
+
     $("#city").select2()
     $("#state").on("change", function() {
         loadCities($(this).val(), []);

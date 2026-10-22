@@ -303,7 +303,6 @@ $per = permissions(7, $mysqli, $user);
 
                         <select name="view" id="view" class="form-control" onchange="this.form.submit()">
                             <option value="">All</option>
-                            <option value="interested" <?= ($_GET['view'] ?? '') == 'interested' ? 'selected' : '' ?>>Interested</option>
                             <option value="pinned" <?= ($_GET['view'] ?? '') == 'pinned' ? 'selected' : '' ?>>Pinned</option>
                         </select>
 
@@ -384,13 +383,7 @@ $per = permissions(7, $mysqli, $user);
                     $view = $_GET['view'] ?? '';
                     $orderBy = "a.is_pinned DESC, a.id DESC";
 
-                    if ($view == 'interested') {
-                        // contacts with a follow-up planned: scheduled/hot status or a remind date set
-                        $where .= " and (d.name IN ('Call Scheduled','Visit Scheduled','Hot leads') OR (a.remind_date IS NOT NULL AND a.remind_date <> '0000-00-00'))";
-                        $where .= " and d.name NOT IN ('Converted','Not interested','Fake','DUPLICATES')";
-                        // pinned first, then the nearest follow-up date
-                        $orderBy = "a.is_pinned DESC, (a.remind_date IS NULL OR a.remind_date = '0000-00-00') ASC, a.remind_date ASC, a.id DESC";
-                    } elseif ($view == 'pinned') {
+                    if ($view == 'pinned') {
                         $where .= " and a.is_pinned = 1";
                     }
 
